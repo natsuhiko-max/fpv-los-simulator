@@ -282,7 +282,7 @@ function App() {
   };
 
   return (
-    <div className="relative h-screen w-screen bg-gray-100 overflow-hidden text-black select-none font-sans text-sm md:text-xs">
+    <div className="relative h-[100dvh] w-screen bg-gray-100 overflow-hidden text-black select-none font-sans text-sm md:text-xs">
       {/* Background Data Map (Invisible) */}
       <div className="absolute inset-0 -z-50 opacity-0 pointer-events-none">
         <Map
@@ -354,9 +354,9 @@ function App() {
         </Map>
       </div>
 
-      <div className={`absolute transition-all duration-300 z-40 ${isMobile ? (showSidebar ? 'bottom-0 left-0 right-0' : 'bottom-10 left-4 right-4') : 'top-20 left-4 w-72'} flex flex-row gap-4 text-black pointer-events-none`}>
+      <div className={`absolute transition-all duration-300 z-40 ${isMobile ? (showSidebar ? 'bottom-0 left-0 right-0' : 'bottom-6 left-4 right-4 pb-safe') : 'top-20 left-4 w-72'} flex flex-row gap-4 text-black pointer-events-none`}>
         {isMobile && !showSidebar && !show3D && (
-          <div className="flex w-full gap-4 px-2 mb-4">
+          <div className="flex w-full gap-4 px-2 mb-2">
             <button onClick={toggleSidebar} className="flex-1 bg-white/95 backdrop-blur shadow-2xl rounded-full py-4 border border-gray-200 flex items-center justify-center gap-2 font-bold text-blue-800 pointer-events-auto active:scale-95 transition-all">
               <Layers size={18} /> <span className="font-bold uppercase tracking-wider text-[10px]">WAYPOINTS</span>
             </button>
