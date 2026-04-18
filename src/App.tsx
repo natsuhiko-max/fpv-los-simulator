@@ -263,7 +263,7 @@ function App() {
         id: 'points-3d',
         data: waypoints,
         getPosition: (d: any) => [d.lng, d.lat, d.groundAlt + d.alt],
-        getFillColor: (d: any, {index}: any) => index === 0 ? [34, 197, 94] : [37, 99, 235],
+        getFillColor: (_: any, {index}: any) => index === 0 ? [34, 197, 94] : [37, 99, 235],
         getRadius: 8,
         radiusMinPixels: 6,
         stroked: true,
