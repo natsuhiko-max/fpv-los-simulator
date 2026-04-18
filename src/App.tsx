@@ -110,24 +110,32 @@ function App() {
   };
 
   const getElevation = useCallback((lng: number, lat: number, map: any): number | null => {
-    if (!map || !map.queryTerrainElevation) return null;
+    if (!map) return null;
     try {
-      return map.queryTerrainElevation([lng, lat]);
+      // queryTerrainElevationは表示中のタイルに依存するため、
+      // 取得できない場合は0ではなくnullを返し、リトライを促す
+      const ele = map.queryTerrainElevation ? map.queryTerrainElevation([lng, lat]) : null;
+      return (ele === 0 || ele === null) ? null : ele;
     } catch (e) {
       return null;
     }
   }, []);
 
   useEffect(() => {
-    const map = map3DRef.current?.getMap() || map2DRef.current?.getMap();
-    if (!map) return;
     const interval = setInterval(() => {
+      // 2Dと3Dの両方のマップインスタンスを確認
+      const map2D = map2DRef.current?.getMap();
+      const map3D = map3DRef.current?.getMap();
+      const activeMap = map3D || map2D;
+
+      if (!activeMap) return;
+
       setWaypoints(prev => {
         let changed = false;
         const next = prev.map(wp => {
           if (wp.isElevating || wp.groundAlt === 0) {
-            const ele = getElevation(wp.lng, wp.lat, map);
-            if (ele !== null && ele !== 0) {
+            const ele = getElevation(wp.lng, wp.lat, activeMap);
+            if (ele !== null) {
               changed = true;
               return { ...wp, groundAlt: ele, isElevating: false };
             }
@@ -136,9 +144,9 @@ function App() {
         });
         return changed ? next : prev;
       });
-    }, 1500);
+    }, 1000); // 頻度を1秒に向上
     return () => clearInterval(interval);
-  }, [getElevation, show3D]);
+  }, [getElevation]);
 
   const onMove = useCallback((evt: any) => setViewState(evt.viewState), []);
   const onViewStateChange = useCallback(({ viewState: vs }: any) => setViewState((v:any) => ({ ...v, ...vs })), []);
@@ -146,15 +154,24 @@ function App() {
   const onMapClick = useCallback((evt: any) => {
     setSelectedWaypointId(null);
     const { lng, lat } = evt.lngLat;
-    const map = map3DRef.current?.getMap() || map2DRef.current?.getMap();
-    const groundAlt = getElevation(lng, lat, map);
-    setWaypoints(prev => [...prev, {
-      id: crypto.randomUUID(),
-      lng, lat, 
-      alt: 5,
-      groundAlt: groundAlt || 0,
-      isElevating: !groundAlt
-    }]);
+    
+    // 現在アクティブなマップを取得
+    const activeMap = map3DRef.current?.getMap() || map2DRef.current?.getMap();
+    const groundAlt = getElevation(lng, lat, activeMap);
+    
+    setWaypoints(prev => {
+      // 直前の点がある場合はその標高を仮置きし、なければ0にする
+      const lastWP = prev[prev.length - 1];
+      const initialGroundAlt = groundAlt || (lastWP ? lastWP.groundAlt : 0);
+      
+      return [...prev, {
+        id: crypto.randomUUID(),
+        lng, lat, 
+        alt: lastWP ? lastWP.alt : 5, // 前の点と同じ高度を引き継ぐと便利
+        groundAlt: initialGroundAlt,
+        isElevating: !groundAlt // 標高が取得できていなければ、バックグラウンドでの取得を有効にする
+      }];
+    });
   }, [getElevation]);
 
   const removeWaypoint = useCallback((id: string) => setWaypoints(p => p.filter(wp => wp.id !== id)), []);
@@ -296,8 +313,12 @@ function App() {
           mapLib={maplibregl}
           mapStyle={{
             version: 8,
-            sources: { 'gsi-std': { type: 'raster', tiles: [GSI_STD_URL], tileSize: 256, attribution: '国土地理院' } },
-            layers: [{ id: 'gsi-std-layer', type: 'raster', source: 'gsi-std' }]
+            sources: { 
+              'gsi-std': { type: 'raster', tiles: [GSI_STD_URL], tileSize: 256, attribution: '国土地理院' },
+              'terrainSource': TERRAIN_CONFIG
+            },
+            layers: [{ id: 'gsi-std-layer', type: 'raster', source: 'gsi-std' }],
+            terrain: { source: 'terrainSource', exaggeration: 1.0 }
           }}
         >
           <NavigationControl position="top-left" showCompass={false} />
