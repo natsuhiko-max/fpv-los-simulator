@@ -143,7 +143,6 @@ function App() {
   }, [getElevation]);
 
   const onMove = useCallback((evt: any) => setViewState(evt.viewState), []);
-  const onViewStateChange = useCallback(({ viewState: vs }: any) => setViewState((v:any) => ({ ...v, ...vs })), []);
 
   const onMapClick = useCallback((evt: any) => {
     setSelectedWaypointId(null);
@@ -465,6 +464,14 @@ function App() {
           className={`absolute bottom-10 right-6 z-30 flex items-center gap-3 bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-full shadow-2xl transition-all ${isMobile ? 'hidden' : ''}`}
         >
           <Eye size={20} /> <span className="font-bold uppercase tracking-wider text-xs">3D VIEW</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+export default App;
+d uppercase tracking-wider text-xs">3D VIEW</span>
         </button>
       )}
     </div>
