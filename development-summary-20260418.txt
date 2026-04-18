@@ -1,0 +1,25 @@
+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
+プロジェクトフォルダに移動して"npm run dev"
+http://localhost:5173/
+
+# FPV LoS Simulator 開発経緯要約（2026-04-18）
+
+## 1. 今回の主な修正内容
+UIの視認性向上と使い勝手の改善、および機能の切り替え実装を行った。
+
+- **高度スライダーの初期値**: 新規ウェイポイント追加時の高度（AGL）初期値を 0m から 5m に変更。
+- **UI表記の最適化**:
+    - "HOME STATION" を "WAYPOINT 1 (HOME)" に変更。
+    - "FPV Route Planner" を "WAYPOINTS" に変更。
+    - "PURE 2D PLANNER ACTIVE" を "2D VIEW" に変更。
+    - "3D Interleaved View" を "3D VIEW" に変更。
+- **フォントとスタイルの統一**:
+    - サイドパネルおよび2Dマップ上のツールチップにおいて、各項目（Home Dist, Path Dist, GND Elev, Total AMSL）のフォント定義（色・太さ）を統一。
+    - "GND Elev:" と "Total AMSL:" 間の横線を削除し、よりクリーンなデザインに変更。
+    - "Home Alt Diff:" の色を青色に統一。
+- **3Dビューの視覚的調整**:
+    - ウェイポイントのアイコン形状をピンから丸いドット（ScatterplotLayer）に戻し、配色をHome（緑）、それ以外（青）に統一。
+    - 経路ラインを太くし、半透明（アルファ値調整）にすることで視認性を向上。
+    - 経路ラインのスタイルをモード別に切り替え（地形図モード: 黒、航空写真モード: 白）。
+- **機能追加**:
+    - サイドパネルに LoS (Line of Sight) 解析の表示/非表示を切り替えるトグルスイッチを設置。これに伴い、2D/3D両方の LoS ライン表示を連動して切り替えるロジックを実装。

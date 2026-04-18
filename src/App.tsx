@@ -62,6 +62,9 @@ function DeckGLOverlay(props: any) {
 }
 
 function App() {
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [showSidebar, setShowSidebar] = useState(window.innerWidth >= 768);
+  const [selectedWaypointId, setSelectedWaypointId] = useState<string | null>(null);
   const [showLos, setShowLos] = useState(true);
   const [viewState, setViewState] = useState<any>(INITIAL_VIEW_STATE);
   const [show3D, setShow3D] = useState(true);
@@ -72,6 +75,39 @@ function App() {
 
   const map2DRef = useRef<any>(null);
   const map3DRef = useRef<any>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) setShowSidebar(true);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // 3Dビューとサイドバーの排他制御（モバイルのみ）
+  useEffect(() => {
+    if (isMobile) {
+      if (show3D) {
+        setShowSidebar(false);
+      }
+    }
+  }, [show3D, isMobile]);
+
+  const toggleSidebar = () => {
+    if (isMobile && !showSidebar && show3D) {
+      setShow3D(false);
+    }
+    setShowSidebar(!showSidebar);
+  };
+
+  const toggle3D = () => {
+    if (isMobile && !show3D && showSidebar) {
+      setShowSidebar(false);
+    }
+    setShow3D(!show3D);
+  };
 
   const getElevation = useCallback((lng: number, lat: number, map: any): number | null => {
     if (!map || !map.queryTerrainElevation) return null;
@@ -108,6 +144,7 @@ function App() {
   const onViewStateChange = useCallback(({ viewState: vs }: any) => setViewState((v:any) => ({ ...v, ...vs })), []);
 
   const onMapClick = useCallback((evt: any) => {
+    setSelectedWaypointId(null);
     const { lng, lat } = evt.lngLat;
     const map = map3DRef.current?.getMap() || map2DRef.current?.getMap();
     const groundAlt = getElevation(lng, lat, map);
@@ -246,7 +283,7 @@ function App() {
   };
 
   return (
-    <div className="relative h-screen w-screen bg-gray-100 overflow-hidden text-black select-none font-sans text-xs">
+    <div className="relative h-screen w-screen bg-gray-100 overflow-hidden text-black select-none font-sans text-sm md:text-xs">
       <div className="absolute inset-0">
         <Map
           ref={map2DRef}
@@ -279,11 +316,19 @@ function App() {
           {waypoints.map((wp, index) => {
             const isBlocked = index > 0 && losResults[wp.id] && !losResults[wp.id].isClear;
             const stats = waypointStats[index];
+            const isSelected = selectedWaypointId === wp.id;
             return (
               <Marker key={wp.id} longitude={wp.lng} latitude={wp.lat} draggable onDragEnd={(evt) => onMarkerDragEnd(wp.id, evt)}>
-                <div className="group relative flex flex-col items-center" onContextMenu={(e) => { e.preventDefault(); removeWaypoint(wp.id); }}>
+                <div 
+                  className="group relative flex flex-col items-center cursor-pointer" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedWaypointId(isSelected ? null : wp.id);
+                  }}
+                  onContextMenu={(e) => { e.preventDefault(); removeWaypoint(wp.id); }}
+                >
                   {/* Tooltip */}
-                  <div className="absolute bottom-full mb-2 bg-gray-900/95 text-white text-[10px] p-2 rounded shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none border border-white/20">
+                  <div className={`absolute bottom-full mb-2 bg-gray-900/95 text-white text-[10px] md:text-[10px] p-2 rounded shadow-2xl ${isSelected ? 'opacity-100 scale-100' : 'opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100'} transition-all whitespace-nowrap z-50 pointer-events-none border border-white/20`}>
                     <div className="font-bold border-b border-white/20 mb-1 pb-1 flex justify-between gap-4">
                       <span>{index === 0 ? 'WAYPOINT 1 (HOME)' : `WAYPOINT ${index+1}`}</span>
                       {isBlocked && <span className="text-red-400 font-black">BLOCKED</span>}
@@ -297,8 +342,8 @@ function App() {
                     </div>
                   </div>
                   
-                  {isBlocked ? <AlertTriangle size={24} className="text-red-600 fill-white drop-shadow animate-bounce" /> : <MapPin size={28} className={`${index === 0 ? 'text-green-500' : 'text-blue-600'} drop-shadow`} fill="currentColor" fillOpacity={0.3} />}
-                  <span className="absolute top-[6px] text-[10px] font-bold text-white pointer-events-none">{index + 1}</span>
+                  {isBlocked ? <AlertTriangle size={isMobile ? 32 : 24} className="text-red-600 fill-white drop-shadow animate-bounce" /> : <MapPin size={isMobile ? 36 : 28} className={`${index === 0 ? 'text-green-500' : 'text-blue-600'} drop-shadow`} fill="currentColor" fillOpacity={0.3} />}
+                  <span className={`absolute ${isMobile ? 'top-[8px]' : 'top-[6px]'} text-[10px] font-bold text-white pointer-events-none`}>{index + 1}</span>
                 </div>
               </Marker>
             );
@@ -306,24 +351,47 @@ function App() {
         </Map>
       </div>
 
-      {/* Control UI */}
-      <div className="absolute top-20 left-4 z-20 w-72 max-h-[75vh] flex flex-col gap-4 text-black">
-        <div className="bg-white/95 backdrop-blur shadow-2xl rounded-2xl border border-gray-200 p-4 overflow-y-auto">
-          <h2 className="font-bold text-sm flex items-center justify-between mb-4 text-blue-800 uppercase tracking-tighter border-b pb-2">
-            <span className="flex items-center gap-2"><Radio size={16} /> WAYPOINTS</span>
-            <button onClick={() => setShowLos(!showLos)} className={`flex items-center gap-1 text-[9px] px-2 py-1 rounded-full border transition-all ${showLos ? 'bg-blue-100 border-blue-300 text-blue-700' : 'bg-gray-100 border-gray-300 text-gray-500'}`}>
-              <Eye size={12} /> {showLos ? 'LOS ON' : 'LOS OFF'}
+      {/* Control UI (Sidebar / Bottom Sheet) */}
+      <div className={`absolute transition-all duration-300 z-40 ${isMobile ? (showSidebar ? 'bottom-0 left-0 right-0' : 'bottom-10 left-4 right-4') : 'top-20 left-4 w-72'} flex flex-row gap-4 text-black pointer-events-none`}>
+        {isMobile && !showSidebar && !show3D && (
+          <div className="flex w-full gap-4 px-2 mb-4">
+            <button 
+              onClick={toggleSidebar} 
+              className="flex-1 bg-white/95 backdrop-blur shadow-2xl rounded-full py-4 border border-gray-200 flex items-center justify-center gap-2 font-bold text-blue-800 pointer-events-auto active:scale-95 transition-all"
+            >
+              <Layers size={18} /> <span className="font-bold uppercase tracking-wider text-[10px]">WAYPOINTS</span>
             </button>
+            <button 
+              onClick={toggle3D} 
+              className="flex-1 bg-blue-600 shadow-2xl rounded-full py-4 border border-blue-500 flex items-center justify-center gap-2 font-bold text-white pointer-events-auto active:scale-95 transition-all"
+            >
+              <Eye size={18} /> <span className="font-bold uppercase tracking-wider text-[10px]">3D VIEW</span>
+            </button>
+          </div>
+        )}
+
+        <div className={`${isMobile && !showSidebar ? 'hidden' : 'flex'} bg-white/95 backdrop-blur shadow-2xl ${isMobile ? 'rounded-t-2xl border-t w-full' : 'rounded-2xl border w-72'} border-gray-200 p-4 flex-col pointer-events-auto`}>
+          <h2 className="font-bold text-sm flex items-center justify-between mb-3 text-blue-800 uppercase tracking-tighter border-b pb-2">
+            <span className="flex items-center gap-2"><Radio size={16} /> WAYPOINTS ({waypoints.length})</span>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setShowLos(!showLos)} className={`flex items-center gap-1 text-[9px] px-2 py-1 rounded-full border transition-all ${showLos ? 'bg-blue-100 border-blue-300 text-blue-700' : 'bg-gray-100 border-gray-300 text-gray-500'}`}>
+                <Eye size={12} /> LOS
+              </button>
+              {isMobile && <button onClick={() => setShowSidebar(false)} className="text-gray-400 p-1.5 hover:bg-red-500/20 rounded-lg font-bold text-xs transition-colors">✕</button>}
+            </div>
           </h2>
-          <div className="space-y-3">
-            {waypoints.map((wp, index) => {
+          
+          <div className={`space-y-3 overflow-y-auto pr-1 ${isMobile ? 'max-h-[30vh]' : 'max-h-[60vh]'}`}>
+            {waypoints.length === 0 ? (
+              <div className="text-center py-8 text-gray-400 italic text-[10px]">Click map to add waypoints</div>
+            ) : waypoints.map((wp, index) => {
               const isBlocked = index > 0 && losResults[wp.id] && !losResults[wp.id].isClear;
               const stats = waypointStats[index];
               return (
                 <div key={wp.id} className={`rounded-xl p-3 border transition-all ${isBlocked ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-100 shadow-sm'}`}>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-[10px] font-extrabold text-gray-500">{index === 0 ? 'WAYPOINT 1 (HOME)' : `WAYPOINT ${index+1}`}</span>
-                    <button onClick={() => removeWaypoint(wp.id)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
+                    <button onClick={() => removeWaypoint(wp.id)} className="text-gray-400 hover:text-red-500 transition-colors p-1"><Trash2 size={16} /></button>
                   </div>
                   
                   <div className="space-y-1 mb-3">
@@ -341,35 +409,41 @@ function App() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <input type="range" min="0" max="500" step="5" value={wp.alt} onChange={(e) => updateAltitude(wp.id, parseInt(e.target.value))} className="flex-1 h-1.5 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-blue-600" />
-                    <span className="text-[10px] font-bold text-blue-600 w-10 text-right">{wp.alt}m AGL</span>
+                    <input type="range" min="0" max="500" step="5" value={wp.alt} onChange={(e) => updateAltitude(wp.id, parseInt(e.target.value))} className="flex-1 h-3 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                    <span className="text-[10px] font-bold text-blue-600 w-12 text-right">{wp.alt}m AGL</span>
                   </div>
                 </div>
               );
             })}
           </div>
-          {waypoints.length > 0 && <button onClick={exportGPX} className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-600 text-white py-3 rounded-xl text-xs font-bold hover:bg-blue-700 shadow-lg active:scale-95 transition-all">Export GPX Path</button>}
+          {waypoints.length > 0 && (
+            <div className="mt-3 pt-3 border-t">
+              <button onClick={exportGPX} className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-3 rounded-xl text-xs font-bold shadow-lg active:scale-95 transition-all">
+                <Download size={16} /> EXPORT GPX PATH
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-        <div className="bg-gray-900/90 backdrop-blur-md px-6 py-2 rounded-full border border-gray-700 shadow-2xl flex items-center gap-4 text-white">
-          <h1 className="font-bold tracking-widest text-xs uppercase text-blue-400">FPV LoS Simulator</h1>
-          <div className="h-3 w-[1px] bg-gray-600" />
-          <div className="text-[10px] font-mono text-gray-400">2D VIEW</div>
+      <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none transition-opacity ${isMobile && (showSidebar || (show3D && is3DExpanded)) ? 'opacity-0' : 'opacity-100'}`}>
+        <div className="bg-gray-900/90 backdrop-blur-md px-4 py-1.5 rounded-full border border-gray-700 shadow-2xl flex items-center gap-3 text-white">
+          <h1 className="font-bold tracking-widest text-[9px] uppercase text-blue-400 whitespace-nowrap">FPV LoS Simulator</h1>
+          <div className="h-3 w-[1px] bg-gray-600 hidden md:block" />
+          <div className="text-[9px] font-mono text-gray-400 hidden md:block">2D VIEW</div>
         </div>
       </div>
 
       {show3D && (
-        <div className={`absolute z-30 transition-all duration-300 shadow-2xl border-4 border-white rounded-2xl overflow-hidden bg-gray-900 ${is3DExpanded ? 'top-20 right-6 left-80 bottom-24' : 'bottom-6 right-6 w-[550px] h-[380px]'}`}>
-          <div className="absolute top-0 left-0 right-0 h-12 bg-gradient-to-b from-black/80 to-transparent z-40 flex items-center justify-between px-4 pointer-events-none">
-            <span className="text-white text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
-              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" /> 3D VIEW
+        <div className={`absolute z-30 transition-all duration-300 shadow-2xl border-4 border-white rounded-2xl overflow-hidden bg-gray-900 ${is3DExpanded ? (isMobile ? 'inset-0 z-50 rounded-none border-0' : 'top-20 right-6 left-80 bottom-24') : (isMobile ? 'bottom-0 right-0 left-0 h-[45vh] rounded-b-none' : 'bottom-6 right-6 w-[550px] h-[380px]')}`}>
+          <div className="absolute top-0 left-0 right-0 h-10 bg-gradient-to-b from-black/80 to-transparent z-40 flex items-center justify-between px-4 pointer-events-none">
+            <span className="text-white text-[9px] font-bold uppercase tracking-widest flex items-center gap-2">
+              <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" /> 3D ANALYSIS
             </span>
-            <div className="flex gap-2 pointer-events-auto">
-              <button onClick={() => setMapType3D(t => t === 'std' ? 'photo' : 'std')} className="p-2 hover:bg-white/20 rounded-lg text-white transition-colors" title="Map Style"><ImageIcon size={16} /></button>
-              <button onClick={() => setIs3DExpanded(!is3DExpanded)} className="p-2 hover:bg-white/20 rounded-lg text-white transition-colors" title="Expand">{is3DExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
-              <button onClick={() => setShow3D(false)} className="p-2 hover:bg-red-500/40 rounded-lg text-white font-bold text-sm">✕</button>
+            <div className="flex gap-1 pointer-events-auto">
+              <button onClick={() => setMapType3D(t => t === 'std' ? 'photo' : 'std')} className="p-1.5 hover:bg-white/20 rounded-lg text-white transition-colors"><ImageIcon size={14} /></button>
+              <button onClick={() => setIs3DExpanded(!is3DExpanded)} className="p-1.5 hover:bg-white/20 rounded-lg text-white transition-colors">{is3DExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button>
+              <button onClick={() => setShow3D(false)} className="p-1.5 hover:bg-red-500/40 rounded-lg text-white font-bold text-xs">✕</button>
             </div>
           </div>
           <Map
@@ -393,8 +467,11 @@ function App() {
       )}
 
       {!show3D && (
-        <button onClick={() => setShow3D(true)} className="absolute bottom-6 right-6 z-30 flex items-center gap-3 bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-full shadow-2xl transition-all">
-          <Eye size={20} /> <span className="font-bold uppercase tracking-wider">Open 3D Analysis</span>
+        <button 
+          onClick={() => setShow3D(true)} 
+          className={`absolute bottom-10 right-6 z-30 flex items-center gap-3 bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-full shadow-2xl transition-all ${isMobile ? 'hidden' : ''}`}
+        >
+          <Eye size={20} /> <span className="font-bold uppercase tracking-wider text-xs">3D VIEW</span>
         </button>
       )}
     </div>

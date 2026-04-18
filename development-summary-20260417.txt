@@ -1,4 +1,7 @@
+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
+プロジェクトフォルダに移動して"npm run dev"
 http://localhost:5173/
+
 
 # FPV LoS Simulator 開発経緯要約（2026-04-17）
 
