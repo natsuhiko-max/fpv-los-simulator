@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Map, NavigationControl, Marker, Source, Layer, useControl } from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import { MapboxOverlay } from '@deck.gl/mapbox';
@@ -464,14 +464,6 @@ function App() {
           className={`absolute bottom-10 right-6 z-30 flex items-center gap-3 bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-full shadow-2xl transition-all ${isMobile ? 'hidden' : ''}`}
         >
           <Eye size={20} /> <span className="font-bold uppercase tracking-wider text-xs">3D VIEW</span>
-        </button>
-      )}
-    </div>
-  );
-}
-
-export default App;
-d uppercase tracking-wider text-xs">3D VIEW</span>
         </button>
       )}
     </div>
