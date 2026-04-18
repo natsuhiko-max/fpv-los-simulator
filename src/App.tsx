@@ -75,6 +75,7 @@ function App() {
 
   const map2DRef = useRef<any>(null);
   const map3DRef = useRef<any>(null);
+  const dataMapRef = useRef<any>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -112,8 +113,6 @@ function App() {
   const getElevation = useCallback((lng: number, lat: number, map: any): number | null => {
     if (!map) return null;
     try {
-      // queryTerrainElevationは表示中のタイルに依存するため、
-      // 取得できない場合は0ではなくnullを返し、リトライを促す
       const ele = map.queryTerrainElevation ? map.queryTerrainElevation([lng, lat]) : null;
       return (ele === 0 || ele === null) ? null : ele;
     } catch (e) {
@@ -123,13 +122,8 @@ function App() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      // 2Dと3Dの両方のマップインスタンスを確認
-      const map2D = map2DRef.current?.getMap();
-      const map3D = map3DRef.current?.getMap();
-      const activeMap = map3D || map2D;
-
+      const activeMap = dataMapRef.current?.getMap() || map3DRef.current?.getMap() || map2DRef.current?.getMap();
       if (!activeMap) return;
-
       setWaypoints(prev => {
         let changed = false;
         const next = prev.map(wp => {
@@ -144,7 +138,7 @@ function App() {
         });
         return changed ? next : prev;
       });
-    }, 1000); // 頻度を1秒に向上
+    }, 1000);
     return () => clearInterval(interval);
   }, [getElevation]);
 
@@ -154,22 +148,17 @@ function App() {
   const onMapClick = useCallback((evt: any) => {
     setSelectedWaypointId(null);
     const { lng, lat } = evt.lngLat;
-    
-    // 現在アクティブなマップを取得
-    const activeMap = map3DRef.current?.getMap() || map2DRef.current?.getMap();
+    const activeMap = dataMapRef.current?.getMap() || map3DRef.current?.getMap() || map2DRef.current?.getMap();
     const groundAlt = getElevation(lng, lat, activeMap);
-    
     setWaypoints(prev => {
-      // 直前の点がある場合はその標高を仮置きし、なければ0にする
       const lastWP = prev[prev.length - 1];
       const initialGroundAlt = groundAlt || (lastWP ? lastWP.groundAlt : 0);
-      
       return [...prev, {
         id: crypto.randomUUID(),
         lng, lat, 
-        alt: lastWP ? lastWP.alt : 5, // 前の点と同じ高度を引き継ぐと便利
+        alt: lastWP ? lastWP.alt : 5,
         groundAlt: initialGroundAlt,
-        isElevating: !groundAlt // 標高が取得できていなければ、バックグラウンドでの取得を有効にする
+        isElevating: !groundAlt
       }];
     });
   }, [getElevation]);
@@ -178,8 +167,8 @@ function App() {
 
   const onMarkerDragEnd = useCallback((id: string, evt: any) => {
     const { lng, lat } = evt.lngLat;
-    const map = map3DRef.current?.getMap() || map2DRef.current?.getMap();
-    const groundAlt = getElevation(lng, lat, map);
+    const activeMap = dataMapRef.current?.getMap() || map3DRef.current?.getMap() || map2DRef.current?.getMap();
+    const groundAlt = getElevation(lng, lat, activeMap);
     setWaypoints(prev => prev.map(wp => 
       wp.id === id ? { ...wp, lng, lat, groundAlt: groundAlt || 0, isElevating: !groundAlt } : wp
     ));
@@ -191,8 +180,8 @@ function App() {
 
   // LoS Analysis
   useEffect(() => {
-    const map = map3DRef.current?.getMap() || map2DRef.current?.getMap();
-    if (!map || waypoints.length < 2) {
+    const activeMap = dataMapRef.current?.getMap() || map3DRef.current?.getMap() || map2DRef.current?.getMap();
+    if (!activeMap || waypoints.length < 2) {
       setLosResults({});
       return;
     }
@@ -209,7 +198,7 @@ function App() {
         const sLng = baseWP.lng + (wp.lng - baseWP.lng) * ratio;
         const sLat = baseWP.lat + (wp.lat - baseWP.lat) * ratio;
         const lineAlt = baseTotalAlt + (wpTotalAlt - baseTotalAlt) * ratio;
-        const groundAlt = getElevation(sLng, sLat, map);
+        const groundAlt = getElevation(sLng, sLat, activeMap);
         if (groundAlt !== null && groundAlt > lineAlt + 1.5) {
           isClear = false;
           break;
@@ -220,17 +209,12 @@ function App() {
     setLosResults(newResults);
   }, [waypoints, viewState, getElevation]);
 
-  // 各点での詳細情報の計算
   const waypointStats = useMemo(() => {
     const stats: any[] = [];
     let cumulativeDist = 0;
     const home = waypoints[0];
-
     waypoints.forEach((wp, i) => {
-      if (i > 0) {
-        cumulativeDist += getDistance(waypoints[i-1].lng, waypoints[i-1].lat, wp.lng, wp.lat);
-      }
-      
+      if (i > 0) cumulativeDist += getDistance(waypoints[i-1].lng, waypoints[i-1].lat, wp.lng, wp.lat);
       stats.push({
         id: wp.id,
         distFromHome: home ? getDistance(home.lng, home.lat, wp.lng, wp.lat) : 0,
@@ -243,7 +227,6 @@ function App() {
     return stats;
   }, [waypoints]);
 
-  // Deck.gl 3D Layers
   const deckLayers = useMemo(() => {
     if (waypoints.length === 0) return [];
     return [
@@ -301,6 +284,21 @@ function App() {
 
   return (
     <div className="relative h-screen w-screen bg-gray-100 overflow-hidden text-black select-none font-sans text-sm md:text-xs">
+      {/* Background Data Map (Invisible) */}
+      <div className="absolute inset-0 -z-50 opacity-0 pointer-events-none">
+        <Map
+          ref={dataMapRef}
+          {...viewState}
+          mapLib={maplibregl}
+          mapStyle={{
+            version: 8,
+            sources: { 'terrainSource': TERRAIN_CONFIG },
+            layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#000' } }],
+            terrain: { source: 'terrainSource', exaggeration: 1.0 }
+          }}
+        />
+      </div>
+
       <div className="absolute inset-0">
         <Map
           ref={map2DRef}
@@ -313,16 +311,11 @@ function App() {
           mapLib={maplibregl}
           mapStyle={{
             version: 8,
-            sources: { 
-              'gsi-std': { type: 'raster', tiles: [GSI_STD_URL], tileSize: 256, attribution: '国土地理院' },
-              'terrainSource': TERRAIN_CONFIG
-            },
-            layers: [{ id: 'gsi-std-layer', type: 'raster', source: 'gsi-std' }],
-            terrain: { source: 'terrainSource', exaggeration: 1.0 }
+            sources: { 'gsi-std': { type: 'raster', tiles: [GSI_STD_URL], tileSize: 256, attribution: '国土地理院' } },
+            layers: [{ id: 'gsi-std-layer', type: 'raster', source: 'gsi-std' }]
           }}
         >
           <NavigationControl position="top-left" showCompass={false} />
-          
           {waypoints.length > 0 && (
             <Source id="flight-path-2d" type="geojson" data={{ type: 'Feature', geometry: { type: 'LineString', coordinates: waypoints.map(wp => [wp.lng, wp.lat]) } } as any}>
               <Layer id="2d-path-layer" type="line" paint={{ 'line-color': '#444', 'line-width': 2.5, 'line-dasharray': [2, 1] }} />
@@ -333,22 +326,13 @@ function App() {
               <Layer id="2d-los-layer" type="line" paint={{ 'line-color': ['case', ['get', 'isClear'], '#3b82f6', '#ef4444'], 'line-width': 2, 'line-opacity': 0.8 }} />
             </Source>
           )}
-
           {waypoints.map((wp, index) => {
             const isBlocked = index > 0 && losResults[wp.id] && !losResults[wp.id].isClear;
             const stats = waypointStats[index];
             const isSelected = selectedWaypointId === wp.id;
             return (
               <Marker key={wp.id} longitude={wp.lng} latitude={wp.lat} draggable onDragEnd={(evt) => onMarkerDragEnd(wp.id, evt)}>
-                <div 
-                  className="group relative flex flex-col items-center cursor-pointer" 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedWaypointId(isSelected ? null : wp.id);
-                  }}
-                  onContextMenu={(e) => { e.preventDefault(); removeWaypoint(wp.id); }}
-                >
-                  {/* Tooltip */}
+                <div className="group relative flex flex-col items-center cursor-pointer" onClick={(e) => { e.stopPropagation(); setSelectedWaypointId(isSelected ? null : wp.id); }} onContextMenu={(e) => { e.preventDefault(); removeWaypoint(wp.id); }}>
                   <div className={`absolute bottom-full mb-2 bg-gray-900/95 text-white text-[10px] md:text-[10px] p-2 rounded shadow-2xl ${isSelected ? 'opacity-100 scale-100' : 'opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100'} transition-all whitespace-nowrap z-50 pointer-events-none border border-white/20`}>
                     <div className="font-bold border-b border-white/20 mb-1 pb-1 flex justify-between gap-4">
                       <span>{index === 0 ? 'WAYPOINT 1 (HOME)' : `WAYPOINT ${index+1}`}</span>
@@ -362,7 +346,6 @@ function App() {
                       <div className="flex justify-between gap-4 text-blue-400"><span>Home Alt Diff:</span><span>{stats.altDiff > 0 ? '+' : ''}{stats.altDiff.toFixed(1)}m</span></div>
                     </div>
                   </div>
-                  
                   {isBlocked ? <AlertTriangle size={isMobile ? 32 : 24} className="text-red-600 fill-white drop-shadow animate-bounce" /> : <MapPin size={isMobile ? 36 : 28} className={`${index === 0 ? 'text-green-500' : 'text-blue-600'} drop-shadow`} fill="currentColor" fillOpacity={0.3} />}
                   <span className={`absolute ${isMobile ? 'top-[8px]' : 'top-[6px]'} text-[10px] font-bold text-white pointer-events-none`}>{index + 1}</span>
                 </div>
@@ -372,25 +355,17 @@ function App() {
         </Map>
       </div>
 
-      {/* Control UI (Sidebar / Bottom Sheet) */}
       <div className={`absolute transition-all duration-300 z-40 ${isMobile ? (showSidebar ? 'bottom-0 left-0 right-0' : 'bottom-10 left-4 right-4') : 'top-20 left-4 w-72'} flex flex-row gap-4 text-black pointer-events-none`}>
         {isMobile && !showSidebar && !show3D && (
           <div className="flex w-full gap-4 px-2 mb-4">
-            <button 
-              onClick={toggleSidebar} 
-              className="flex-1 bg-white/95 backdrop-blur shadow-2xl rounded-full py-4 border border-gray-200 flex items-center justify-center gap-2 font-bold text-blue-800 pointer-events-auto active:scale-95 transition-all"
-            >
+            <button onClick={toggleSidebar} className="flex-1 bg-white/95 backdrop-blur shadow-2xl rounded-full py-4 border border-gray-200 flex items-center justify-center gap-2 font-bold text-blue-800 pointer-events-auto active:scale-95 transition-all">
               <Layers size={18} /> <span className="font-bold uppercase tracking-wider text-[10px]">WAYPOINTS</span>
             </button>
-            <button 
-              onClick={toggle3D} 
-              className="flex-1 bg-blue-600 shadow-2xl rounded-full py-4 border border-blue-500 flex items-center justify-center gap-2 font-bold text-white pointer-events-auto active:scale-95 transition-all"
-            >
+            <button onClick={toggle3D} className="flex-1 bg-blue-600 shadow-2xl rounded-full py-4 border border-blue-500 flex items-center justify-center gap-2 font-bold text-white pointer-events-auto active:scale-95 transition-all">
               <Eye size={18} /> <span className="font-bold uppercase tracking-wider text-[10px]">3D VIEW</span>
             </button>
           </div>
         )}
-
         <div className={`${isMobile && !showSidebar ? 'hidden' : 'flex'} bg-white/95 backdrop-blur shadow-2xl ${isMobile ? 'rounded-t-2xl border-t w-full' : 'rounded-2xl border w-72'} border-gray-200 p-4 flex-col pointer-events-auto`}>
           <h2 className="font-bold text-sm flex items-center justify-between mb-3 text-blue-800 uppercase tracking-tighter border-b pb-2">
             <span className="flex items-center gap-2"><Radio size={16} /> WAYPOINTS ({waypoints.length})</span>
@@ -401,7 +376,6 @@ function App() {
               {isMobile && <button onClick={() => setShowSidebar(false)} className="text-gray-400 p-1.5 hover:bg-red-500/20 rounded-lg font-bold text-xs transition-colors">✕</button>}
             </div>
           </h2>
-          
           <div className={`space-y-3 overflow-y-auto pr-1 ${isMobile ? 'max-h-[30vh]' : 'max-h-[60vh]'}`}>
             {waypoints.length === 0 ? (
               <div className="text-center py-8 text-gray-400 italic text-[10px]">Click map to add waypoints</div>
@@ -414,7 +388,6 @@ function App() {
                     <span className="text-[10px] font-extrabold text-gray-500">{index === 0 ? 'WAYPOINT 1 (HOME)' : `WAYPOINT ${index+1}`}</span>
                     <button onClick={() => removeWaypoint(wp.id)} className="text-gray-400 hover:text-red-500 transition-colors p-1"><Trash2 size={16} /></button>
                   </div>
-                  
                   <div className="space-y-1 mb-3">
                     {wp.isElevating ? (
                       <div className="flex items-center gap-1 text-[10px] text-blue-500 animate-pulse"><Loader2 size={10} className="animate-spin" /> Fetching Position Data...</div>
@@ -428,7 +401,6 @@ function App() {
                       </div>
                     )}
                   </div>
-
                   <div className="flex items-center gap-2">
                     <input type="range" min="0" max="500" step="5" value={wp.alt} onChange={(e) => updateAltitude(wp.id, parseInt(e.target.value))} className="flex-1 h-3 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-blue-600" />
                     <span className="text-[10px] font-bold text-blue-600 w-12 text-right">{wp.alt}m AGL</span>
