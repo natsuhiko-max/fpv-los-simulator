@@ -155,7 +155,7 @@ function App() {
       return [...prev, {
         id: crypto.randomUUID(),
         lng, lat, 
-        alt: lastWP ? lastWP.alt : 5,
+        alt: 5,
         groundAlt: initialGroundAlt,
         isElevating: !groundAlt
       }];
