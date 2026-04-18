@@ -25,9 +25,9 @@ const TERRAIN_CONFIG = {
 };
 
 const INITIAL_VIEW_STATE = {
-  longitude: 138.877, 
-  latitude: 35.424,
-  zoom: 13,
+  longitude: 138.0, 
+  latitude: 36.0,
+  zoom: 12,
   pitch: 45,
   bearing: 0
 };
