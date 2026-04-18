@@ -427,7 +427,7 @@ function App() {
       </div>
 
       {show3D && (
-        <div className={`absolute z-30 transition-all duration-300 shadow-2xl border-4 border-white rounded-2xl overflow-hidden bg-gray-900 ${is3DExpanded ? (isMobile ? 'inset-0 z-50 rounded-none border-0' : 'top-20 right-6 left-80 bottom-24') : (isMobile ? 'bottom-0 right-0 left-0 h-[45vh] rounded-b-none' : 'bottom-6 right-6 w-[550px] h-[380px]')}`}>
+        <div className={`absolute z-30 transition-all duration-300 shadow-2xl border-4 border-white rounded-2xl overflow-hidden bg-gray-900 ${is3DExpanded ? (isMobile ? 'top-2 bottom-2 left-2 right-2 z-50' : 'top-20 right-6 left-80 bottom-24') : (isMobile ? 'bottom-4 left-4 right-4 h-[45vh]' : 'bottom-6 right-6 w-[550px] h-[380px]')}`}>
           <div className="absolute top-0 left-0 right-0 h-10 bg-gradient-to-b from-black/80 to-transparent z-40 flex items-center justify-between px-4 pointer-events-none">
             <span className="text-white text-[9px] font-bold uppercase tracking-widest flex items-center gap-2">
               <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" /> 3D ANALYSIS
