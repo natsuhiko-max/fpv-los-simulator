@@ -3,7 +3,7 @@ import { Map, NavigationControl, Marker, Source, Layer, useControl } from 'react
 import maplibregl from 'maplibre-gl';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { PathLayer, ScatterplotLayer } from '@deck.gl/layers';
-import { Layers, Image as ImageIcon, Maximize2, Minimize2, Eye, Trash2, MapPin, Radio, AlertTriangle, Download, Loader2 } from 'lucide-react';
+import { Layers, Image as ImageIcon, Maximize2, Minimize2, Eye, Trash2, MapPin, Radio, AlertTriangle, Download, Loader2, Camera } from 'lucide-react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 // 国土地理院タイルの設定
@@ -272,13 +272,169 @@ function App() {
     ];
   }, [waypoints, losResults, mapType3D, showLos]);
 
+  const exportImage = () => {
+    const map = map2DRef.current?.getMap();
+    if (!map || waypoints.length === 0) return;
+
+    const originalShowLos = showLos;
+    setShowLos(false); // LoSを状態管理で一時的に非表示にする
+
+    // Reactの状態変更が反映され、地図が更新されるのを待つ
+    requestAnimationFrame(() => {
+      const lons = waypoints.map(wp => wp.lng);
+      const lats = waypoints.map(wp => wp.lat);
+      const bounds = [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]] as [[number, number], [number, number]];
+      
+      map.fitBounds(bounds, { padding: 80, maxZoom: 15, animate: false });
+      
+      // 地図が完全に描画され、移動が完了するのを待つ
+      map.once('idle', () => {
+        const mapCanvas = map.getCanvas();
+        const dpr = window.devicePixelRatio || 1;
+        const outCanvas = document.createElement('canvas');
+        outCanvas.width = mapCanvas.width;
+        outCanvas.height = mapCanvas.height;
+        const ctx = outCanvas.getContext('2d');
+        if (!ctx) return;
+
+        ctx.drawImage(mapCanvas, 0, 0); // LoSが非表示の状態の地図を描画
+
+        const wpPoints = waypoints.map(wp => {
+          const p = map.project([wp.lng, wp.lat]);
+          return { x: p.x * dpr, y: p.y * dpr };
+        });
+
+        // 他のラベルやマーカーとの衝突判定用のリスト
+        const occupiedRects: {x: number, y: number, w: number, h: number}[] = wpPoints.map(p => ({
+          x: p.x - 12 * dpr, y: p.y - 12 * dpr, w: 24 * dpr, h: 24 * dpr // マーカーの領域
+        }));
+
+        waypoints.forEach((wp, i) => {
+          const stats = waypointStats[i];
+          const { x, y } = wpPoints[i];
+
+          // マーカー描画
+          ctx.beginPath();
+          ctx.arc(x, y, 10 * dpr, 0, Math.PI * 2);
+          ctx.fillStyle = i === 0 ? '#22c55e' : '#2563eb';
+          ctx.fill();
+          ctx.strokeStyle = 'white';
+          ctx.lineWidth = 2 * dpr;
+          ctx.stroke();
+          ctx.fillStyle = 'white';
+          ctx.font = `bold ${10 * dpr}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText((i + 1).toString(), x, y);
+
+          const labelLines = [
+            `H.Dist: ${stats.distFromHome.toFixed(0)}m`,
+            `P.Dist: ${stats.totalDist.toFixed(0)}m`,
+            `AGL: ${wp.alt}m`,
+            `H.Alt Diff: ${stats.altDiff > 0 ? '+' : ''}${stats.altDiff.toFixed(1)}m`
+          ];
+
+          const padding = 6 * dpr;
+          const fontSize = 9 * dpr;
+          ctx.font = `bold ${fontSize}px monospace`;
+          const maxW = Math.max(...labelLines.map(l => ctx.measureText(l).width));
+          const boxW = maxW + padding * 2;
+          const boxH = (fontSize * 1.3 * labelLines.length) + padding * 2;
+          
+          // 配置候補（右、左、下、上）
+          const candidates = [
+            { bx: x + 15 * dpr, by: y - boxH / 2, name: 'right' },
+            { bx: x - boxW - 15 * dpr, by: y - boxH / 2, name: 'left' },
+            { bx: x - boxW / 2, by: y + 15 * dpr, name: 'bottom' },
+            { bx: x - boxW / 2, by: y - boxH - 11 * dpr, name: 'top' } // top position adjusted slightly
+          ];
+
+          // スコアリング関数：重なりの少なさで評価
+          const getScore = (rect: any) => {
+            let score = 0;
+            const r = { x1: rect.bx - 5, y1: rect.by - 5, x2: rect.bx + boxW + 5, y2: rect.by + boxH + 5 }; // 判定用マージン付き矩形
+            
+            // 画面外ペナルティ
+            if (r.x1 < 0 || r.x2 > outCanvas.width || r.y1 < 0 || r.y2 > outCanvas.height) return -1000;
+            
+            // 他のラベル・マーカーとの重なりペナルティ
+            occupiedRects.forEach(occ => {
+              if (!(r.x2 < occ.x || r.x1 > occ.x + occ.w || r.y2 < occ.y || r.y1 > occ.y + occ.h)) score -= 500;
+            });
+
+            // 経路ラインとの重なりペナルティ（簡易サンプリング）
+            for (let j = 0; j < wpPoints.length - 1; j++) {
+              const p1 = wpPoints[j];
+              const p2 = wpPoints[j+1];
+              // 線分上の数点をサンプリング
+              for (let t = 0; t <= 1; t += 0.2) {
+                const sx = p1.x + (p2.x - p1.x) * t;
+                const sy = p1.y + (p2.y - p1.y) * t;
+                if (sx > r.x1 && sx < r.x2 && sy > r.y1 && sy < r.y2) score -= 100;
+              }
+            }
+            return score;
+          };
+
+          let bestCandidate = candidates[0];
+          let maxScore = -Infinity;
+          candidates.forEach(c => {
+            const s = getScore(c);
+            if (s > maxScore) { maxScore = s; bestCandidate = c; }
+          });
+
+          //強制補正（最終手段）
+          if (bestCandidate.bx < 5) bestCandidate.bx = 5;
+          if (bestCandidate.bx + boxW > outCanvas.width - 5) bestCandidate.bx = outCanvas.width - boxW - 5;
+          if (bestCandidate.by < 5) bestCandidate.by = 5;
+          if (bestCandidate.by + boxH > outCanvas.height - 5) bestCandidate.by = outCanvas.height - boxH - 5;
+
+          occupiedRects.push({ x: bestCandidate.bx, y: bestCandidate.by, w: boxW, h: boxH });
+
+          // ラベル描画
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(bestCandidate.bx, bestCandidate.by, boxW, boxH, 4 * dpr);
+          else ctx.rect(bestCandidate.bx, bestCandidate.by, boxW, boxH);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.lineWidth = 1 * dpr;
+          ctx.stroke();
+
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          labelLines.forEach((line, idx) => {
+            if (line.startsWith('AGL')) ctx.fillStyle = '#60a5fa'; // Tailwind blue-400
+            else if (line.startsWith('H.Alt Diff')) ctx.fillStyle = '#f87171'; // Tailwind red-400
+            else ctx.fillStyle = 'white';
+            ctx.fillText(line, bestCandidate.bx + padding, bestCandidate.by + padding + (idx * fontSize * 1.3));
+          });
+        });
+        
+        const dataUrl = outCanvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.download = `fpv-los-simulation-${new Date().toISOString().slice(0,10)}.png`;
+        link.href = dataUrl;
+        link.click();
+
+        // LoSレイヤーを元に戻す (React state経由で)
+        if (originalShowLos) {
+          setShowLos(true);
+        }
+      });
+      
+      map.triggerRepaint();
+    });
+  };
+
   const exportGPX = () => {
     if (waypoints.length === 0) return;
     const gpxHeader = '<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="FPV LoS Simulator" xmlns="http://www.topografix.com/GPX/1/1">';
     const points = waypoints.map((wp, i) => `<trkpt lat="${wp.lat}" lon="${wp.lng}"><ele>${Math.round(wp.groundAlt + wp.alt)}</ele><name>WP${i+1}</name></trkpt>`).join('');
+    const dateStr = new Date().toISOString().slice(0,10);
     const blob = new Blob([gpxHeader + '<trk><name>FPV Route</name><trkseg>' + points + '</trkseg></trk></gpx>'], { type: 'application/gpx+xml' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `fpv-path.gpx`; a.click();
+    const a = document.createElement('a'); a.href = url; a.download = `fpv-los-simulation-${dateStr}.gpx`; a.click();
   };
 
   return (
@@ -308,6 +464,7 @@ function App() {
           onMove={onMove} onClick={onMapClick}
           dragRotate={false} touchPitch={false}
           mapLib={maplibregl}
+          preserveDrawingBuffer={true}
           mapStyle={{
             version: 8,
             sources: { 'gsi-std': { type: 'raster', tiles: [GSI_STD_URL], tileSize: 256, attribution: '国土地理院' } },
@@ -409,9 +566,12 @@ function App() {
             })}
           </div>
           {waypoints.length > 0 && (
-            <div className="mt-3 pt-3 border-t">
-              <button onClick={exportGPX} className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-3 rounded-xl text-xs font-bold shadow-lg active:scale-95 transition-all">
-                <Download size={16} /> EXPORT GPX PATH
+            <div className="mt-3 pt-3 border-t flex gap-2">
+              <button onClick={exportGPX} className="flex-1 flex items-center justify-center gap-2 bg-gray-600 text-white py-3 rounded-xl text-[10px] font-bold shadow-lg active:scale-95 transition-all">
+                <Download size={14} /> GPX
+              </button>
+              <button onClick={exportImage} className="flex-1 flex items-center justify-center gap-2 bg-blue-600 text-white py-3 rounded-xl text-[10px] font-bold shadow-lg active:scale-95 transition-all">
+                <Camera size={14} /> SAVE IMAGE
               </button>
             </div>
           )}
