@@ -341,38 +341,70 @@ function App() {
           const boxW = maxW + padding * 2;
           const boxH = (fontSize * 1.3 * labelLines.length) + padding * 2;
           
-          // 配置候補（右、左、下、上）
-          const candidates = [
-            { bx: x + 15 * dpr, by: y - boxH / 2, name: 'right' },
-            { bx: x - boxW - 15 * dpr, by: y - boxH / 2, name: 'left' },
-            { bx: x - boxW / 2, by: y + 15 * dpr, name: 'bottom' },
-            { bx: x - boxW / 2, by: y - boxH - 11 * dpr, name: 'top' } // top position adjusted slightly
-          ];
+          // 配置候補（100px以上の距離を優先的に探せるようにステップを調整）
+          const offsets = [60, 110, 160, 210, 260]; 
+          const candidates: { bx: number, by: number, dist: number, name: string }[] = [];
+          
+          offsets.forEach(offset => {
+            const d = offset * dpr;
+            candidates.push(
+              { bx: x + d, by: y - boxH / 2, dist: d, name: 'right' },
+              { bx: x - boxW - d, by: y - boxH / 2, dist: d, name: 'left' },
+              { bx: x - boxW / 2, by: y + d, dist: d, name: 'bottom' },
+              { bx: x - boxW / 2, by: y - boxH - d, dist: d, name: 'top' },
+              { bx: x + d * 0.7, by: y - boxH - d * 0.7, dist: d, name: 'top-right' },
+              { bx: x - boxW - d * 0.7, by: y - boxH - d * 0.7, dist: d, name: 'top-left' },
+              { bx: x + d * 0.7, by: y + d * 0.7, dist: d, name: 'bottom-right' },
+              { bx: x - boxW - d * 0.7, by: y + d * 0.7, dist: d, name: 'bottom-left' }
+            );
+          });
+
+          // 点と線分の最短距離を計算する関数
+          const getDistToSegment = (px: number, py: number, x1: number, y1: number, x2: number, y2: number) => {
+            const l2 = (x1 - x2) ** 2 + (y1 - y2) ** 2;
+            if (l2 === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+            let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            return Math.sqrt((px - (x1 + t * (x2 - x1))) ** 2 + (py - (y1 + t * (y2 - y1))) ** 2);
+          };
+
+          const lineBuffer = 100 * dpr; // 経路ラインから最低限離したい距離（100pxに拡張）
 
           // スコアリング関数：重なりの少なさで評価
           const getScore = (rect: any) => {
             let score = 0;
-            const r = { x1: rect.bx - 5, y1: rect.by - 5, x2: rect.bx + boxW + 5, y2: rect.by + boxH + 5 }; // 判定用マージン付き矩形
+            const r = { x1: rect.bx, y1: rect.by, x2: rect.bx + boxW, y2: rect.by + boxH };
+            const cx = rect.bx + boxW / 2;
+            const cy = rect.by + boxH / 2;
             
-            // 画面外ペナルティ
-            if (r.x1 < 0 || r.x2 > outCanvas.width || r.y1 < 0 || r.y2 > outCanvas.height) return -1000;
+            // 1. 画面外ペナルティ（致命的）
+            if (r.x1 < 20 || r.x2 > outCanvas.width - 20 || r.y1 < 20 || r.y2 > outCanvas.height - 20) return -30000;
             
-            // 他のラベル・マーカーとの重なりペナルティ
+            // 2. 他のラベル・マーカーとの重なり（致命的）
             occupiedRects.forEach(occ => {
-              if (!(r.x2 < occ.x || r.x1 > occ.x + occ.w || r.y2 < occ.y || r.y1 > occ.y + occ.h)) score -= 500;
+              const overlapX = Math.max(0, Math.min(r.x2 + 15, occ.x + occ.w + 15) - Math.max(r.x1 - 15, occ.x - 15));
+              const overlapY = Math.max(0, Math.min(r.y2 + 15, occ.y + occ.h + 15) - Math.max(r.y1 - 15, occ.y - 15));
+              if (overlapX > 0 && overlapY > 0) score -= 8000;
             });
 
-            // 経路ラインとの重なりペナルティ（簡易サンプリング）
+            // 3. 経路ラインとの距離判定（100pxバッファ）
+            let minDistToLine = Infinity;
             for (let j = 0; j < wpPoints.length - 1; j++) {
-              const p1 = wpPoints[j];
-              const p2 = wpPoints[j+1];
-              // 線分上の数点をサンプリング
-              for (let t = 0; t <= 1; t += 0.2) {
-                const sx = p1.x + (p2.x - p1.x) * t;
-                const sy = p1.y + (p2.y - p1.y) * t;
-                if (sx > r.x1 && sx < r.x2 && sy > r.y1 && sy < r.y2) score -= 100;
-              }
+              const d = getDistToSegment(cx, cy, wpPoints[j].x, wpPoints[j].y, wpPoints[j+1].x, wpPoints[j+1].y);
+              if (d < minDistToLine) minDistToLine = d;
             }
+
+            if (minDistToLine < lineBuffer) {
+              score -= (lineBuffer - minDistToLine) * 150;
+              score -= 5000; 
+            } else {
+              // バッファを超えている場合は、ラインから適度に離れているほど加点
+              score += Math.min(minDistToLine, lineBuffer * 1.5) * 5;
+            }
+
+            // 4. ウェイポイントに近いほど少しだけ優先
+            score -= rect.dist * 0.2;
+            
             return score;
           };
 
@@ -383,21 +415,53 @@ function App() {
             if (s > maxScore) { maxScore = s; bestCandidate = c; }
           });
 
-          //強制補正（最終手段）
-          if (bestCandidate.bx < 5) bestCandidate.bx = 5;
-          if (bestCandidate.bx + boxW > outCanvas.width - 5) bestCandidate.bx = outCanvas.width - boxW - 5;
-          if (bestCandidate.by < 5) bestCandidate.by = 5;
-          if (bestCandidate.by + boxH > outCanvas.height - 5) bestCandidate.by = outCanvas.height - boxH - 5;
-
+          // 確定した矩形を記録
           occupiedRects.push({ x: bestCandidate.bx, y: bestCandidate.by, w: boxW, h: boxH });
 
-          // ラベル描画
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+          // 4角のうち最もウェイポイントに近い角を選択
+          const corners = [
+            { cx: bestCandidate.bx, cy: bestCandidate.by, ix: 1, iy: 1 },
+            { cx: bestCandidate.bx + boxW, cy: bestCandidate.by, ix: -1, iy: 1 },
+            { cx: bestCandidate.bx, cy: bestCandidate.by + boxH, ix: 1, iy: -1 },
+            { cx: bestCandidate.bx + boxW, cy: bestCandidate.by + boxH, ix: -1, iy: -1 }
+          ];
+          let bestCorner = corners[0];
+          let minCDist = Infinity;
+          corners.forEach(c => {
+            const d = Math.sqrt((c.cx - x)**2 + (c.cy - y)**2);
+            if (d < minCDist) { minCDist = d; bestCorner = c; }
+          });
+
+          // 引き出し線の描画（ツールチップと同じ色）
+          // 隙間を完全になくすため、1px分だけツールチップの内側に食い込ませる
+          const targetX = bestCorner.cx + (bestCorner.ix * dpr);
+          const targetY = bestCorner.cy + (bestCorner.iy * dpr);
+          
+          const angle = Math.atan2(targetY - y, targetX - x);
+          const startX = x + Math.cos(angle) * 8 * dpr;
+          const startY = y + Math.sin(angle) * 8 * dpr;
+
+          // 影・縁取り効果
           ctx.beginPath();
-          if (ctx.roundRect) ctx.roundRect(bestCandidate.bx, bestCandidate.by, boxW, boxH, 4 * dpr);
+          ctx.moveTo(startX, startY);
+          ctx.lineTo(targetX, targetY);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+          ctx.lineWidth = 3 * dpr;
+          ctx.stroke();
+          
+          // メインの線（ツールチップと同じ色: 0.65）
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.65)';
+          ctx.lineWidth = 1.5 * dpr;
+          ctx.stroke();
+
+          // ラベル背景描画（0.65）
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+          ctx.beginPath();
+          // 角の丸みを少し抑える(2px)ことで、引き出し線との接続をより自然にする
+          if (ctx.roundRect) ctx.roundRect(bestCandidate.bx, bestCandidate.by, boxW, boxH, 2 * dpr);
           else ctx.rect(bestCandidate.bx, bestCandidate.by, boxW, boxH);
           ctx.fill();
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
           ctx.lineWidth = 1 * dpr;
           ctx.stroke();
 
