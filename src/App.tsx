@@ -464,7 +464,7 @@ function App() {
           onMove={onMove} onClick={onMapClick}
           dragRotate={false} touchPitch={false}
           mapLib={maplibregl}
-          mapOptions={{ preserveDrawingBuffer: true }}
+          {...({ preserveDrawingBuffer: true } as any)}
           mapStyle={{
             version: 8,
             sources: { 'gsi-std': { type: 'raster', tiles: [GSI_STD_URL], tileSize: 256, attribution: '国土地理院' } },
